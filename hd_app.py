@@ -52,7 +52,7 @@ bodies = {
     "Saturn": swe.SATURN,
     "Jupiter": swe.JUPITER,
     "Uranus": swe.URANUS,
-    "Neptun": swe.NEPTUN,
+    "Neptun": swe.NEPTUNE,
     "Pluto": swe.PLUTO
 }
 
