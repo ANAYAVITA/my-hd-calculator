@@ -1,52 +1,74 @@
 import streamlit as st
 import swisseph as swe
 import datetime
-import pytz
 from geopy.geocoders import Nominatim
+import pandas as pd
 
-# Konfiguration der Swiss Ephemeris (Pfad zu den Dateien)
+# 1. System-Konfiguration: Daten direkt von der Quelle beziehen
+# Dies verhindert Fehler, falls lokale Ephemeriden-Dateien fehlen
 swe.set_ephe_path('') 
 
-def get_hd_data(jd_ut, body_id):
-    """Berechnet Tor und Linie für einen Himmelskörper."""
-    res, ret = swe.calc_ut(jd_ut, body_id)
-    longitude = res[0]
-    # 360 Grad / 64 Tore = 5.625 Grad pro Tor
-    gate = int(longitude / 5.625) + 1
-    line = int((longitude % 5.625) / (5.625 / 6)) + 1
-    return gate, line
+def get_hd_gate(longitude):
+    """Berechnet Tor und Linie aus der ekliptikalen Länge."""
+    # 360 Grad / 64 Tore = 5.625
+    gate_float = longitude / 5.625
+    gate = int(gate_float) + 1
+    line = int((gate_float - int(gate_float)) * 6) + 1
+    return f"{gate}.{line}"
 
-st.title("Gabriebeles HD-Standort-Tool")
-
-# Input-Bereich
-with st.form("input_form"):
-    date = st.date_input("Datum", datetime.date.today())
-    time = st.time_input("Uhrzeit", datetime.time(12, 0))
-    location_name = st.text_input("Ort (Stadt, Land)", "Berlin, Germany")
-    submit = st.form_submit_button("Berechnen")
-
-if submit:
-    # 1. Geokodierung (Längen-/Breitengrad)
-    geolocator = Nominatim(user_agent="hd_app")
-    loc = geolocator.geocode(location_name)
+def calculate_design_time(birth_jd):
+    """Berechnet den Zeitpunkt 88 Grad Sonnenbogen vor der Geburt."""
+    # Ermittle Sonnenstand zur Geburt
+    res, ret = swe.calc_ut(birth_jd, swe.SUN)
+    birth_sun_pos = res[0]
     
-    # 2. Zeit-Korrektur (Wichtig: Alles muss auf UTC normiert werden)
-    # Hinweis: In einer vollen Version müsste hier die Zeitzone des Ortes geladen werden.
-    dt = datetime.combine(date, time)
-    jd_ut = swe.julday(dt.year, dt.month, dt.day, dt.hour + dt.minute/60)
-
-    # 3. Berechnung der Positionen (Personality)
-    bodies = {
-        "Sonne": swe.SUN,
-        "Mond": swe.MOON,
-        "Chiron": 15,
-        "Saturn": swe.SATURN
-    }
+    # Ziel: Sonnenstand minus 88 Grad
+    target_sun_pos = (birth_sun_pos - 88) % 360
     
-    st.subheader("Aktuelle Planetenstände (Personality)")
-    for name, bid in bodies.items():
-        gate, line = get_hd_data(jd_ut, bid)
-        st.write(f"**{name}:** Tor {gate}.{line}")
+    # Einfache Annäherung: 88 Grad entsprechen ca. 89.1 Tagen
+    design_jd = birth_jd - 89.1
+    return design_jd, target_sun_pos
 
-    # 4. Berechnung des Design-Zeitpunkts (88 Grad Sonnenbogen zurück)
-    # Hier müsste eine iterative Suche implementiert werden.
+st.set_page_config(page_title="HD Analyse-Tool", layout="wide")
+st.title("Human Design Standortbestimmung")
+
+# Eingabemaske
+with st.sidebar:
+    st.header("Geburtsdaten")
+    d = st.date_input("Datum", datetime.date(1980, 1, 1))
+    t = st.time_input("Uhrzeit", datetime.time(12, 0))
+    # Wichtig: Für exakte Daten müsste hier noch die Zeitzone (UTC-Offset) rein
+    utc_offset = st.number_input("Zeitzone (UTC Offset, z.B. 1 für Berlin)", value=1)
+
+# Berechnung starten
+jd_birth = swe.julday(d.year, d.month, d.day, (t.hour - utc_offset) + t.minute/60)
+jd_design, target_sun = calculate_design_time(jd_birth)
+
+# Definition der relevanten Körper (Invarianten des Systems)
+bodies = {
+    "Sonne": swe.SUN,
+    "Mond": swe.MOON,
+    "Chiron": 15,
+    "Saturn": swe.SATURN,
+    "Jupiter": swe.JUPITER,
+    "Uranus": swe.URANUS,
+    "Neptun": swe.NEPTUN,
+    "Pluto": swe.PLUTO
+}
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("Personality (Bewusst)")
+    for name, id in bodies.items():
+        res, ret = swe.calc_ut(jd_birth, id)
+        st.write(f"**{name}:** {get_hd_gate(res[0])}")
+
+with col2:
+    st.subheader("Design (Unbewusst)")
+    for name, id in bodies.items():
+        res, ret = swe.calc_ut(jd_design, id)
+        st.write(f"**{name}:** {get_hd_gate(res[0])}")
+
+st.info("Hinweis: Dies ist eine strukturelle Berechnung auf Basis der Swiss Ephemeris. "
+        "Die Design-Zeit wird hier über den Standard-Bogen von 88° genähert.")
